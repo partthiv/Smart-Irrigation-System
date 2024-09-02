@@ -1,63 +1,63 @@
-#include <lpc214x.h> // LPC2148 Header file
-#include <stdio.h>    // For sprintf function
+#include <lpc214x.h>
+#include "LCD.h"
+#include "ADC.h"
 
-#define MOISTURE_THRESHOLD 400
+#define MOTOR_EN1 (1 << 10) // P0.10 for motor enable 1
+#define MOTOR_EN2 (1 << 11) // P0.11 for motor enable 2
+#define LED (1 << 12)       // P0.12 for LED
 
-void adc_init(void);
-unsigned int adc(int ch);
-void lcd_init(void);
-void lcd_display(const char *str);
-void gpio_init(void);
+unsigned int val;
+float moisture_percentage;
+int int_part;
+int frac_part;
 
-int main(void) {
-    unsigned int moisture_level;
-    char moisture_str[16];
+int main()
+{
+    // Initialize LCD and ADC
+    lcd_init(); // Initialize LCD
+    ADC_Init(); // Initialize ADC
 
-    // Initialize peripherals
-    lcd_init();
-    gpio_init();
-    adc_init();
+    // Set all pins of port 0 as output
+    IODIR0 |= MOTOR_EN1 | MOTOR_EN2 | LED; 
 
-    while (1) {
-        // Read moisture level from ADC
-        moisture_level = adc(1); // Example: Channel 1
+    // Configure ADC (assuming AD0.6 is the desired ADC channel)
+    PINSEL0 |= (1 << 12); // Select AD0.6 function for P0.6
+    VPBDIV = 0x02; // Set the peripheral clock (pclk) to 1/2 of the CPU clock
 
-        // Display moisture level on LCD
-        sprintf(moisture_str, "Moisture: %u", moisture_level);
-        lcd_display(moisture_str);
+    while (1)
+    {
+        // Read ADC value from channel 6
+        val = ADC_Read(6); // Adjust channel as needed
 
-        // Control motor based on moisture level
-        if (moisture_level < MOISTURE_THRESHOLD) {
-            IOSET0 = (1 << 10); // Set GPIO pin to turn on the motor
-            lcd_display("LOW MOISTURE");
-        } else {
-            IOCLR0 = (1 << 10); // Clear GPIO pin to turn off the motor
-            lcd_display("MOISTURE OK");
+        // Convert ADC value to moisture percentage (0-100%)
+        moisture_percentage = (val / 1023.0f) * 100.0f;
+
+        // Calculate integer and fractional parts
+        int_part = (int)moisture_percentage;
+        frac_part = (int)((moisture_percentage - int_part) * 10); // Using 10 for one decimal place
+
+        // Display moisture percentage on LCD
+        lcd_clear();
+        lcd_set_cursor(0, 0);
+        lcd_print("Moisture: ");
+        lcd_print_char((int_part / 10) + 48); // Display tens place of integer part
+        lcd_print_char((int_part % 10) + 48); // Display units place of integer part
+        lcd_print_char('.'); // Display decimal point
+        lcd_print_char(frac_part + 48); // Display fractional part
+        lcd_print("%"); // Display percentage symbol
+
+        // Check if moisture is below 40%
+        if (moisture_percentage < 40.0f)
+        {
+            IOSET0 = MOTOR_EN1 | LED; // Turn on LED and motor enable 1
+            IOCLR0 = MOTOR_EN2; // Ensure motor enable 2 is off
+        }
+        else
+        {
+            IOCLR0 = LED | MOTOR_EN1 | MOTOR_EN2; // Turn off LED and stop motor
         }
 
-        // Add a delay for stability (consider using a timer instead)
-        for (volatile int i = 0; i < 50000; i++);
+        // Delay for a while (adjust as needed)
+        for(volatile int i = 0; i < 1000000; i++);
     }
-}
-
-void adc_init(void) {
-    // Initialize ADC (example settings, verify with datasheet)
-    PINSEL1 |= (1 << 14); // Select AD0.1 function
-    AD0CR = 0x00200600; // Configure ADC (Example settings)
-}
-
-unsigned int adc(int ch) {
-    unsigned int val;
-
-    AD0CR = (AD0CR & ~(0xFF)) | (1 << ch); // Select channel
-    AD0CR |= (1 << 24); // Start conversion
-    while ((AD0GDR & (1 << 31)) == 0); // Wait for conversion to complete
-    val = AD0GDR;
-    val = (val >> 6) & 0x03FF; // Extract the 10-bit ADC value
-    return val;
-}
-
-void gpio_init(void) {
-    // Initialize GPIO (example for pin 10 as output)
-    IO0DIR |= (1 << 10); // Set GPIO pin 10 as output
 }
